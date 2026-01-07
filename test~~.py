@@ -1,69 +1,95 @@
-#!/usr/bin/env python 
+#!/usr/bin/env python
 # -*- coding:utf-8 -*-
-# import torch
-# import cv2
-# import torch.nn as nn
-#
-# aa = cv2.imread('contents/image.png') / 255.
-# aa = torch.FloatTensor(aa).permute(2, 0, 1).unsqueeze(0)
-#
-#
-# class ss(nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#         self.c1 = nn.Conv2d(3, 64, 3)
-#         self.c2 = nn.Conv2d(64, 32, 3)
-#         self.c3 = nn.Conv2d(32, 2, 3)
-#
-#     def forward(self, x):
-#         self.x = x
-#         self.x1 = self.c1(self.x)
-#         self.x1.retain_grad()
-#
-#         self.x2_d = self.x1.detach()
-#         self.x2_d.requires_grad = True
-#
-#         self.x2 = self.c2(self.x2_d)
-#         self.x2.retain_grad()
-#
-#         self.x3 = self.c3(self.x2)
-#
-#         return self.x3
-#
-#
-# net = ss()
-# net.train()
-#
-# out = net(aa)
-# loss = torch.sum((out - 1) ** 2)
-#
-# loss.backward()
-# print(net.x1.grad)
 
-import matplotlib.pyplot as plt
+import os
+import argparse
 import numpy as np
-import io
-from PIL import Image
-import cv2
+import torch
+import torch.nn.functional as F
+from tqdm import tqdm
 
-# 使用plt进行画图
-
-ss = Image.open('slark.png')  # 读取图片像素为512X512
-fig = plt.figure("Image")  # 图像窗口名称
-
-plt.imshow(ss)
-
-buffer = io.BytesIO()  # 获取输入输出流对象
-print(buffer)
-
-fig.canvas.print_png(buffer)  # 将画布上的内容打印到输入输出流对象
-data = buffer.getvalue()  # 获取流的值
-
-buffer.write(data)  # 将数据写入buffer
-img = np.array(Image.open(buffer))
+from Dataset import test_dataset
+from config import update_config
+from models.unet import UNet
 
 
-print("转换的图片array的尺寸为:\n", img.shape)
-cv2.imwrite("02.jpg", img)
+def rotate_180(x):
+    # x: (B, C, H, W)
+    return torch.rot90(x, 2, [2, 3])
 
-buffer.close()
+
+@torch.no_grad()
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='avenue')
+    parser.add_argument('--trained_model', type=str, required=True)
+    args = parser.parse_args()
+
+    # -----------------------
+    # Config
+    # -----------------------
+    cfg = update_config(args, mode='test')
+    cfg.print_cfg()
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # -----------------------
+    # Load model
+    # -----------------------
+    model = UNet()
+    model.load_state_dict(torch.load(cfg.trained_model, map_location=device))
+    model.to(device)
+    model.eval()
+
+    # -----------------------
+    # Prepare test videos
+    # -----------------------
+    video_folders = sorted([
+        os.path.join(cfg.test_data, f)
+        for f in os.listdir(cfg.test_data)
+        if os.path.isdir(os.path.join(cfg.test_data, f))
+    ])
+
+    os.makedirs('results', exist_ok=True)
+
+    # -----------------------
+    # Inference
+    # -----------------------
+    for vid, video_folder in enumerate(video_folders, start=1):
+        dataset = test_dataset(cfg, video_folder)
+        scores = []
+
+        for i in tqdm(range(len(dataset)), desc=f'Video {vid}'):
+            clip = dataset[i]  # shape: (5*3, H, W)
+            clip = torch.from_numpy(clip).unsqueeze(0).to(device)
+
+            # Predict next frame (last frame supervision)
+            input_clip = clip[:, :-3]
+            gt = clip[:, -3:]
+
+            # original
+            pred = model(input_clip)
+            loss1 = F.mse_loss(pred, gt, reduction='mean')
+
+            # rotated (robust to upside-down corruption)
+            input_rot = rotate_180(input_clip)
+            gt_rot = rotate_180(gt)
+            pred_rot = model(input_rot)
+            loss2 = F.mse_loss(pred_rot, gt_rot, reduction='mean')
+
+            loss = min(loss1.item(), loss2.item())
+            scores.append(loss)
+
+        scores = np.array(scores, dtype=np.float32)
+
+        # pad first frames (unpredictable frames)
+        pad = np.full((4,), scores[0], dtype=np.float32)
+        scores = np.concatenate([pad, scores])
+
+        np.save(f'results/{vid:02d}.npy', scores)
+
+    print("Inference completed. Results saved in /results")
+
+
+if __name__ == '__main__':
+    main()
