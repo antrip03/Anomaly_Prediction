@@ -1,19 +1,25 @@
-#!/usr/bin/env python 
+#!/usr/bin/env python
 # -*- coding:utf-8 -*-
+
 from glob import glob
 import os
 
-if not os.path.exists('tensorboard_log'):
-    os.mkdir('tensorboard_log')
-if not os.path.exists('weights'):
-    os.mkdir('weights')
-if not os.path.exists('results'):
-    os.mkdir('results')
+# Create necessary folders (Kaggle-safe)
+for folder in ['tensorboard_log', 'weights', 'results']:
+    if not os.path.exists(folder):
+        os.mkdir(folder)
 
-share_config = {'mode': 'training',
-                'dataset': 'avenue',
-                'img_size': (256, 256),
-                'data_root': '/home/feiyu/Data/'}  # remember the final '/'
+# ============================
+# Shared configuration
+# ============================
+share_config = {
+    'mode': 'test',
+    'dataset': 'avenue',
+    'img_size': (256, 256),
+
+    # 🔥 Kaggle dataset root (IMPORTANT)
+    'data_root': '/kaggle/input/pixel-play-26/Avenue_Corrupted-20251221T112159Z-3-001/Avenue_Corrupted/Dataset/'
+}  # MUST end with '/'
 
 
 class dict2class:
@@ -29,27 +35,54 @@ class dict2class:
 
 
 def update_config(args=None, mode=None):
+    """
+    Only TEST mode is used in this competition.
+    Training-related options are kept for compatibility but unused.
+    """
+
+    # ----------------------------
+    # Basic setup
+    # ----------------------------
     share_config['mode'] = mode
     assert args.dataset in ('ped2', 'avenue', 'shanghaitech'), 'Dataset error.'
     share_config['dataset'] = args.dataset
 
-    if mode == 'train':
+    # ----------------------------
+    # TEST MODE (USED)
+    # ----------------------------
+    if mode == 'test':
+        share_config['test_data'] = (
+            share_config['data_root'] + 'testing_videos/'
+        )
+
+        # 🔥 Pretrained Avenue model
+        share_config['trained_model'] = args.trained_model
+
+        # Visualization flags (safe to keep False)
+        share_config['show_curve'] = False
+        share_config['show_heatmap'] = False
+
+    # ----------------------------
+    # TRAIN MODE (NOT USED, KEPT SAFE)
+    # ----------------------------
+    elif mode == 'train':
         share_config['batch_size'] = args.batch_size
-        share_config['train_data'] = share_config['data_root'] + args.dataset + '/training/'
-        share_config['test_data'] = share_config['data_root'] + args.dataset + '/testing/'
+        share_config['train_data'] = (
+            share_config['data_root'] + 'training_videos/'
+        )
+        share_config['test_data'] = (
+            share_config['data_root'] + 'testing_videos/'
+        )
+
         share_config['g_lr'] = 0.0002
         share_config['d_lr'] = 0.00002
-        share_config['resume'] = glob(f'weights/{args.resume}*')[0] if args.resume else None
+        share_config['resume'] = (
+            glob(f'weights/{args.resume}*')[0] if args.resume else None
+        )
         share_config['iters'] = args.iters
         share_config['show_flow'] = args.show_flow
         share_config['save_interval'] = args.save_interval
         share_config['val_interval'] = args.val_interval
         share_config['flownet'] = args.flownet
 
-    elif mode == 'test':
-        share_config['test_data'] = share_config['data_root'] + args.dataset + '/testing/'
-        share_config['trained_model'] = args.trained_model
-        share_config['show_curve'] = args.show_curve
-        share_config['show_heatmap'] = args.show_heatmap
-
-    return dict2class(share_config)  # change dict keys to class attributes
+    return dict2class(share_config)
