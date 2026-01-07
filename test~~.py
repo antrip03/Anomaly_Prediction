@@ -39,7 +39,11 @@ def main():
     model = UNet(12)
 
 
-    model.load_state_dict(torch.load(cfg.trained_model, map_location=device))
+    ckpt = torch.load(cfg.trained_model, map_location=device)
+
+    # pretrained generator weights are stored under 'net_g'
+    model.load_state_dict(ckpt['net_g'], strict=True)
+
     model.to(device)
     model.eval()
 
