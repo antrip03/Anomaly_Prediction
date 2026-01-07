@@ -36,7 +36,8 @@ def main():
     # -----------------------
     # Load model
     # -----------------------
-    model = UNet(input_channels=12, output_channels=3)
+    model = UNet(12)
+
 
     model.load_state_dict(torch.load(cfg.trained_model, map_location=device))
     model.to(device)
